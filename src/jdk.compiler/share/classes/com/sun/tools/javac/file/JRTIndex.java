@@ -48,35 +48,25 @@ import java.util.Set;
 import javax.tools.FileObject;
 
 import com.sun.tools.javac.file.RelativePath.RelativeDirectory;
-import com.sun.tools.javac.util.Context;
+import jdk.internal.misc.PreviewFeatures;
 
 /**
  * A package-oriented index into the jrt: filesystem.
  */
 public class JRTIndex {
     /** Get a shared instance of the cache. */
-    private static JRTIndex sharedInstance;
-    public static synchronized JRTIndex getSharedInstance() {
-        if (sharedInstance == null) {
+    //TODO: should really use LazyConstant:
+    private static JRTIndex[] sharedInstance = new JRTIndex[2];
+    public static synchronized JRTIndex getSharedInstance(boolean preview) {
+        int idx = preview ? 1 : 0;
+        if (sharedInstance[idx] == null) {
             try {
-                sharedInstance = new JRTIndex();
+                sharedInstance[idx] = new JRTIndex(preview);
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }
         }
-        return sharedInstance;
-    }
-
-    /** Get a context-specific instance of a cache. */
-    public static JRTIndex instance(Context context) {
-        try {
-            JRTIndex instance = context.get(JRTIndex.class);
-            if (instance == null)
-                context.put(JRTIndex.class, instance = new JRTIndex());
-            return instance;
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+        return sharedInstance[idx];
     }
 
     public static boolean isAvailable() {
@@ -176,8 +166,12 @@ public class JRTIndex {
     /**
      * Create and initialize the index.
      */
-    private JRTIndex() throws IOException {
-        jrtfs = FileSystems.getFileSystem(URI.create("jrt:/"));
+    private JRTIndex(boolean previewMode) throws IOException {
+        if (PreviewFeatures.isEnabled() == previewMode) {
+            jrtfs = FileSystems.getFileSystem(URI.create("jrt:/"));
+        } else {
+            jrtfs = FileSystems.newFileSystem(URI.create("jrt:/"), Map.of("previewMode", String.valueOf(previewMode)));
+        }
         entries = new HashMap<>();
     }
 
@@ -226,6 +220,10 @@ public class JRTIndex {
             entries.put(rd, new SoftReference<>(e));
         }
         return e;
+    }
+
+    public FileSystem getJRTFS() {
+        return jrtfs;
     }
 
     public boolean isInJRT(FileObject fo) {

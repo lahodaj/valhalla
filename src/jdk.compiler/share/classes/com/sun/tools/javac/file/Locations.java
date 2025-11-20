@@ -132,6 +132,7 @@ public class Locations {
     Map<Path, FileSystem> fileSystems = new LinkedHashMap<>();
     List<Closeable> closeables = new ArrayList<>();
     private String releaseVersion = null;
+    private boolean previewMode = false;
 
     Locations() {
         initHandlers();
@@ -224,6 +225,11 @@ public class Locations {
     public void setMultiReleaseValue(String multiReleaseValue) {
         // Null is implicitly allowed and unsets the value.
         this.releaseVersion = multiReleaseValue;
+    }
+
+    public void setPreviewMode(boolean previewMode) {
+        // Null is implicitly allowed and unsets the value.
+        this.previewMode = previewMode;
     }
 
     private boolean contains(Collection<Path> searchPath, Path file) throws IOException {
@@ -1950,11 +1956,12 @@ public class Locations {
                     FileSystem jrtfs;
 
                     if (isCurrentPlatform(systemJavaHome)) {
-                        jrtfs = FileSystems.getFileSystem(jrtURI);
+                        jrtfs = JRTIndex.getSharedInstance(previewMode).getJRTFS();
                     } else {
                         try {
                             Map<String, String> attrMap =
-                                    Collections.singletonMap("java.home", systemJavaHome.toString());
+                                    Map.of("java.home", systemJavaHome.toString(),
+                                           "previewMode", String.valueOf(previewMode));
                             jrtfs = FileSystems.newFileSystem(jrtURI, attrMap);
                         } catch (ProviderNotFoundException ex) {
                             URL jfsJar = resolveInJavaHomeLib(systemJavaHome, "jrt-fs.jar").toUri().toURL();

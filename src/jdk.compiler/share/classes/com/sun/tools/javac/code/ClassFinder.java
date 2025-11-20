@@ -218,7 +218,8 @@ public class ClassFinder {
         } else {
             useCtProps = false;
         }
-        jrtIndex = useCtProps && JRTIndex.isAvailable() ? JRTIndex.getSharedInstance() : null;
+        Preview preview = Preview.instance(context);
+        jrtIndex = useCtProps && JRTIndex.isAvailable() ? JRTIndex.getSharedInstance(preview.isEnabled()) : null;
 
         profile = Profile.instance(context);
         cachedCompletionFailure = new CompletionFailure(null, () -> null, dcfh);

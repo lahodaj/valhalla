@@ -450,10 +450,8 @@ public class JavacFileManager extends BaseFileManager implements StandardJavaFil
         }
     }
 
-    private synchronized JRTIndex getJRTIndex() {
-        if (jrtIndex == null)
-            jrtIndex = JRTIndex.getSharedInstance();
-        return jrtIndex;
+    private JRTIndex getJRTIndex() {
+        return JRTIndex.getSharedInstance(previewMode);
     }
 
     private JRTIndex jrtIndex;
