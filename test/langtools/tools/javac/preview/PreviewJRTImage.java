@@ -45,71 +45,78 @@ import org.junit.Test;
 import toolbox.JavacTask;
 import toolbox.Task;
 import toolbox.Task.Expect;
+import toolbox.Task.Mode;
 import toolbox.ToolBox;
 
 import static org.junit.Assert.*;
 
 public class PreviewJRTImage {
 
+    private final ToolBox tb = new ToolBox();
     private final String specificationVersion = System.getProperty("java.specification.version");
 
     @Test
     public void testVersionInDependency() throws Exception {
         Path root = Paths.get(".");
+        Path src = root.resolve("src");
+
+        tb.writeJavaFiles(src,
+                          """
+                          import sun.misc.Unsafe;
+                          public class Test {
+                              void test() {
+                                  Boolean b = true;
+                                  synchronized (b) {
+                                  }
+                                  Unsafe u;
+                              }
+                          }
+                          """);
+
         Path classes = root.resolve("classes");
         Files.createDirectories(classes);
-        ToolBox tb = new ToolBox();
 
         List<String> log;
         List<String> expected;
 
-        //without preview:
-        log = new JavacTask(tb)
-                .outdir(classes)
-                .options("--source", specificationVersion, "-XDrawDiagnostics")
-                .sources("""
-                         public class Test {
-                             void test() {
-                                 Boolean b = true;
-                                 synchronized (b) {
-                                 }
-                             }
-                         }
-                         """)
-                .run()
-                .writeAll()
-                .getOutputLines(Task.OutputKind.DIRECT);
+        for (Mode mode : new Mode[] {Mode.API, Mode.CMDLINE}) {
+            //without preview:
+            log = new JavacTask(tb, mode)
+                    .outdir(classes)
+                    .options("--source", specificationVersion, "-XDrawDiagnostics")
+                    .files(tb.findJavaFiles(src))
+                    .run()
+                    .writeAll()
+                    .getOutputLines(Task.OutputKind.DIRECT);
 
-        expected = List.of(
-                "Test.java:4:9: compiler.warn.attempt.to.synchronize.on.instance.of.value.based.class",
-                "1 warning"
-        );
+            expected = List.of(
+                    "Test.java:1:16: compiler.warn.sun.proprietary: sun.misc.Unsafe",
+                    "Test.java:7:9: compiler.warn.sun.proprietary: sun.misc.Unsafe",
+                    "Test.java:5:9: compiler.warn.attempt.to.synchronize.on.instance.of.value.based.class",
+                    "3 warnings"
+            );
 
-        assertEquals(expected, log);
+            assertEquals(expected, log);
 
-        //with preview:
-        log = new JavacTask(tb)
-                .outdir(classes)
-                .options("--source", specificationVersion, "--enable-preview", "-XDrawDiagnostics")
-                .sources("""
-                         public class Test {
-                             void test() {
-                                 Boolean b = true;
-                                 synchronized (b) {
-                                 }
-                             }
-                         }
-                         """)
-                .run(Expect.FAIL)
-                .writeAll()
-                .getOutputLines(Task.OutputKind.DIRECT);
+            //with preview:
+            log = new JavacTask(tb, mode)
+                    .outdir(classes)
+                    .options("--source", specificationVersion, "--enable-preview", "-XDrawDiagnostics")
+                    .files(tb.findJavaFiles(src))
+                    .run(Expect.FAIL)
+                    .writeAll()
+                    .getOutputLines(Task.OutputKind.DIRECT);
 
-        expected = List.of(
-                "Test.java:4:9: compiler.err.type.found.req: java.lang.Boolean, (compiler.misc.type.req.identity)",
-                "1 error"
-        );
+            expected = List.of(
+                    "Test.java:1:16: compiler.warn.sun.proprietary: sun.misc.Unsafe",
+                    "Test.java:5:9: compiler.err.type.found.req: java.lang.Boolean, (compiler.misc.type.req.identity)",
+                    "Test.java:7:9: compiler.warn.sun.proprietary: sun.misc.Unsafe",
+                    "1 error",
+                    "2 warnings"
+            );
 
-        assertEquals(expected, log);
+            assertEquals(expected, log);
+        }
     }
 
 }

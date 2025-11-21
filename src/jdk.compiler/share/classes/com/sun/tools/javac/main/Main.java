@@ -301,6 +301,7 @@ public class Main {
             fileManager.handleOption(Option.MULTIRELEASE.primaryName, list.iterator());
         }
 
+        // pass preview mode to the file manager:
         if (fileManager.isSupportedOption(Option.PREVIEWMODE.primaryName) == 1) {
             Preview preview = Preview.instance(context);
             fileManager.handleOption(Option.PREVIEWMODE.primaryName, List.of(String.valueOf(preview.isEnabled())).iterator());
