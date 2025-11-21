@@ -67,6 +67,7 @@ import static com.sun.tools.javac.code.Kinds.Kind.*;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Symbol.CompletionFailure;
 import com.sun.tools.javac.main.DelegatingJavaFileManager;
+import com.sun.tools.javac.main.JavaCompiler;
 
 import com.sun.tools.javac.util.Dependencies.CompletionCause;
 
@@ -218,8 +219,14 @@ public class ClassFinder {
         } else {
             useCtProps = false;
         }
-        Preview preview = Preview.instance(context);
-        jrtIndex = useCtProps && JRTIndex.isAvailable() ? JRTIndex.getSharedInstance(preview.isEnabled()) : null;
+        if (useCtProps && JRTIndex.isAvailable()) {
+            Preview preview = Preview.instance(context);
+            JavaCompiler comp = JavaCompiler.instance(context);
+            jrtIndex = JRTIndex.getInstance(preview.isEnabled());
+            comp.closeables = comp.closeables.prepend(() -> jrtIndex.endUse());
+        } else {
+            jrtIndex = null;
+        }
 
         profile = Profile.instance(context);
         cachedCompletionFailure = new CompletionFailure(null, () -> null, dcfh);

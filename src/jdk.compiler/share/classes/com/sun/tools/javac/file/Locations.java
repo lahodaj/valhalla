@@ -1956,7 +1956,9 @@ public class Locations {
                     FileSystem jrtfs;
 
                     if (isCurrentPlatform(systemJavaHome)) {
-                        jrtfs = JRTIndex.getSharedInstance(previewMode).getJRTFS();
+                        JRTIndex jrtIndex = JRTIndex.getInstance(previewMode);
+                        closeables.add(() -> jrtIndex.endUse());
+                        jrtfs = jrtIndex.getJRTFS();
                     } else {
                         try {
                             Map<String, String> attrMap =

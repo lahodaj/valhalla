@@ -55,18 +55,22 @@ import jdk.internal.misc.PreviewFeatures;
  */
 public class JRTIndex {
     /** Get a shared instance of the cache. */
-    //TODO: should really use LazyConstant:
     private static JRTIndex[] sharedInstance = new JRTIndex[2];
-    public static synchronized JRTIndex getSharedInstance(boolean preview) {
-        int idx = preview ? 1 : 0;
+    public static synchronized JRTIndex getInstance(boolean previewMode) {
+        int idx = getSlot(previewMode);
         if (sharedInstance[idx] == null) {
             try {
-                sharedInstance[idx] = new JRTIndex(preview);
+                sharedInstance[idx] = new JRTIndex(previewMode);
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }
         }
+        sharedInstance[idx].useCount++;
         return sharedInstance[idx];
+    }
+
+    private static int getSlot(boolean previewMode) {
+        return previewMode ? 1 : 0;
     }
 
     public static boolean isAvailable() {
@@ -78,6 +82,10 @@ public class JRTIndex {
         }
     }
 
+
+    private int useCount;
+    private final boolean previewMode;
+    private final boolean globalInstance;
 
     /**
      * The jrt: file system.
@@ -167,9 +175,12 @@ public class JRTIndex {
      * Create and initialize the index.
      */
     private JRTIndex(boolean previewMode) throws IOException {
+        this.previewMode = previewMode;
         if (PreviewFeatures.isEnabled() == previewMode) {
+            globalInstance = true;
             jrtfs = FileSystems.getFileSystem(URI.create("jrt:/"));
         } else {
+            globalInstance = false;
             jrtfs = FileSystems.newFileSystem(URI.create("jrt:/"), Map.of("previewMode", String.valueOf(previewMode)));
         }
         entries = new HashMap<>();
@@ -269,4 +280,18 @@ public class JRTIndex {
     }
 
     private ResourceBundle ctBundle;
+
+    public void endUse() throws IOException {
+        if (globalInstance) {
+            return ;
+        }
+
+        synchronized (JRTIndex.class) {
+            if (--useCount == 0) {
+                sharedInstance[getSlot(previewMode)] = null;
+                entries.clear();
+                jrtfs.close();
+            }
+        }
+    }
 }

@@ -388,6 +388,14 @@ public class JavacFileManager extends BaseFileManager implements StandardJavaFil
     };
 
     private final class JRTImageContainer implements Container {
+        private JRTIndex jrtIndex;
+
+        private JRTIndex getJRTIndex() {
+            if (jrtIndex == null) {
+                jrtIndex = JRTIndex.getInstance(previewMode);
+            }
+            return jrtIndex;
+        }
 
         /**
          * Insert all files in a subdirectory of the platform image
@@ -437,6 +445,9 @@ public class JavacFileManager extends BaseFileManager implements StandardJavaFil
 
         @Override
         public void close() throws IOException {
+            if (jrtIndex != null) {
+                jrtIndex.endUse();
+            }
         }
 
         @Override
@@ -449,12 +460,6 @@ public class JavacFileManager extends BaseFileManager implements StandardJavaFil
             return List.nil();
         }
     }
-
-    private JRTIndex getJRTIndex() {
-        return JRTIndex.getSharedInstance(previewMode);
-    }
-
-    private JRTIndex jrtIndex;
 
     private final class DirectoryContainer implements Container {
         private final Path directory;
