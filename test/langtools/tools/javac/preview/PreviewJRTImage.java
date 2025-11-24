@@ -30,8 +30,10 @@
  *          jdk.compiler/com.sun.tools.javac.main
  *          jdk.compiler/com.sun.tools.javac.platform
  *          jdk.compiler/com.sun.tools.javac.util:+open
- * @run junit PreviewJRTImage
- * @run junit/othervm --enable-preview PreviewJRTImage
+ * @run junit/othervm -DDISABLE_PREVIEW_PATCHING=false PreviewJRTImage
+ * @run junit/othervm -DDISABLE_PREVIEW_PATCHING=false --enable-preview PreviewJRTImage
+ * @run junit/othervm -DDISABLE_PREVIEW_PATCHING=true PreviewJRTImage
+ * @run junit/othervm -DDISABLE_PREVIEW_PATCHING=true --enable-preview PreviewJRTImage
  */
 
 
