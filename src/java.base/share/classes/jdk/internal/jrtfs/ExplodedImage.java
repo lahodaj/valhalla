@@ -33,12 +33,15 @@ import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import jdk.internal.jimage.ImageReader.Node;
+import jdk.internal.jimage.PreviewMode;
 
 /**
  * A jrt file system built on $JAVA_HOME/modules directory ('exploded modules
@@ -59,9 +62,11 @@ class ExplodedImage extends SystemImage {
     private final String separator;
     private final Map<String, PathNode> nodes = new HashMap<>();
     private final BasicFileAttributes modulesDirAttrs;
+    private final PreviewMode previewMode;
 
-    ExplodedImage(Path modulesDir) throws IOException {
+    ExplodedImage(Path modulesDir, PreviewMode previewMode) throws IOException {
         this.modulesDir = modulesDir;
+        this.previewMode = previewMode;
         String str = modulesDir.getFileSystem().getSeparator();
         separator = str.equals("/") ? null : str;
         modulesDirAttrs = Files.readAttributes(modulesDir, BasicFileAttributes.class);
@@ -78,7 +83,7 @@ class ExplodedImage extends SystemImage {
 
         private PathNode(String name, Path path, BasicFileAttributes attrs) {  // path
             super(name, attrs);
-            this.path = path;
+            this.path = getPreviewCorrectedPath(path);
         }
 
         private PathNode(String name, Node link) {              // link
@@ -150,6 +155,22 @@ class ExplodedImage extends SystemImage {
             } catch (IOException ex) {
                 throw new UncheckedIOException(ex);
             }
+        }
+        private Path getPreviewCorrectedPath(Path p) {
+            if (!previewMode.isPreviewModeEnabled() || !Files.isRegularFile(p)) {
+                return p;
+            }
+            String relativePath = modulesDir.relativize(p).toString();
+            int moduleSeparator = relativePath.indexOf('/');
+            String moduleName = relativePath.substring(0, moduleSeparator);
+            String filePath = relativePath.substring(moduleSeparator + 1);
+            Path previewPath = modulesDir.resolve(moduleName).resolve("META-INF").resolve("preview").resolve(filePath);
+
+            if (Files.isRegularFile(previewPath)) {
+                return previewPath;
+            }
+
+            return p;
         }
     }
 
