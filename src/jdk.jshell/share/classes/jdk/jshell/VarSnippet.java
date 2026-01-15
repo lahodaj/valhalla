@@ -52,6 +52,7 @@ public class VarSnippet extends DeclarationSnippet {
      * and inaccessible types. {@literal null} if enhancing the type is not necessary.
      */
     final String fullTypeName;
+    final boolean nonNull;
 
     /**The anonymous class declared in the initializer of the "var" variable.
      * These are automatically statically imported when the field is imported.
@@ -62,12 +63,14 @@ public class VarSnippet extends DeclarationSnippet {
 
      VarSnippet(VarKey key, String userSource, Wrap guts,
             String name, String fieldName, SubKind subkind, String typeName, String fullTypeName,
+            boolean nonNull,
             Set<String> anonymousClasses, Collection<String> declareReferences,
             DiagList syntheticDiags) {
         super(key, userSource, guts, name, subkind, null, declareReferences,
                 null, syntheticDiags);
         this.typeName = typeName;
         this.fullTypeName = fullTypeName;
+        this.nonNull = nonNull;
         this.anonymousClasses = anonymousClasses;
         this.fieldName = fieldName;
     }

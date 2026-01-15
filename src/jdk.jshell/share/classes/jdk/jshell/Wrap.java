@@ -88,10 +88,19 @@ abstract class Wrap implements GeneralWrap {
      *         an initialization method
      */
     public static Wrap varWrap(String source, Wrap wtype, String brackets,
-                               Wrap wname, Wrap winit, boolean enhanced,
+                               Wrap wname, Wrap winit, boolean forceInitialization, boolean enhanced,
                                Wrap anonDeclareWrap) {
         List<Object> components = new ArrayList<>();
-        components.add(new VarDeclareWrap(wtype, brackets, wname));
+
+        if (forceInitialization) {
+            components.add(new VarDeclareWrap(wtype, brackets, wname, simpleWrap("noOpInit$()")));
+            components.add(new CompoundWrap("    private static <$> $ noOpInit$() {\n"
+                    + "        return null;\n",
+                    "    }\n"));
+        } else {
+            components.add(new VarDeclareWrap(wtype, brackets, wname));
+        }
+
         Wrap wmeth;
 
         if (winit == null) {
@@ -560,6 +569,9 @@ abstract class Wrap implements GeneralWrap {
 
         VarDeclareWrap(Wrap wtype, String brackets, Wrap wname) {
             super("    public static ", wtype, brackets + " ", wname, semi(wname));
+        }
+        VarDeclareWrap(Wrap wtype, String brackets, Wrap wname, Wrap init) {
+            super("    public static ", wtype, brackets + " ", wname, " = ", init, ";\n");
         }
     }
 

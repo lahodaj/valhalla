@@ -66,6 +66,7 @@ import com.sun.source.util.TaskEvent;
 import com.sun.source.util.TaskListener;
 import com.sun.tools.javac.api.JavacTaskPool;
 import com.sun.tools.javac.code.ClassFinder;
+import com.sun.tools.javac.code.Flags;
 import com.sun.tools.javac.code.Kinds;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Symbol.ClassSymbol;
@@ -79,22 +80,26 @@ import com.sun.tools.javac.comp.Attr;
 import com.sun.tools.javac.comp.AttrContext;
 import com.sun.tools.javac.comp.Enter;
 import com.sun.tools.javac.comp.Env;
+import com.sun.tools.javac.comp.NullChecksWriter;
 import com.sun.tools.javac.comp.Resolve;
 import com.sun.tools.javac.parser.JavacParser;
-import com.sun.tools.javac.parser.Lexer;
 import com.sun.tools.javac.parser.Parser;
 import com.sun.tools.javac.parser.ParserFactory;
 import com.sun.tools.javac.parser.ScannerFactory;
-import static com.sun.tools.javac.parser.Tokens.TokenKind.AMP;
 import com.sun.tools.javac.tree.JCTree;
+import com.sun.tools.javac.tree.JCTree.JCAssign;
 import com.sun.tools.javac.tree.JCTree.JCExpression;
+import com.sun.tools.javac.tree.JCTree.JCNullableTypeExpression.NullMarker;
 import com.sun.tools.javac.tree.JCTree.JCTypeCast;
 import com.sun.tools.javac.tree.JCTree.JCVariableDecl;
 import com.sun.tools.javac.tree.JCTree.Tag;
+import com.sun.tools.javac.tree.TreeInfo;
 import com.sun.tools.javac.util.Context.Factory;
 import com.sun.tools.javac.util.Log;
 import com.sun.tools.javac.util.Log.DiscardDiagnosticHandler;
 import com.sun.tools.javac.util.Names;
+import java.util.HashSet;
+import java.util.Set;
 import static jdk.internal.jshell.debug.InternalDebugControl.DBG_FMGR;
 import jdk.jshell.Snippet.Status;
 
@@ -147,7 +152,8 @@ class TaskFactory {
                        List.of("-XDallowStringFolding=false", "-proc:none",
                                "-XDneedsReplParserFactory=" + forceExpression),
                        (jti, diagnostics) -> new ParseTask(sh, jti, diagnostics, forceExpression),
-                       worker);
+                       worker,
+                       false);
     }
 
     public <Z> Z analyze(OuterWrap wrap,
@@ -181,7 +187,8 @@ class TaskFactory {
                        sh,
                        allOptions,
                        (jti, diagnostics) -> new AnalyzeTask(sh, jti, diagnostics),
-                       worker);
+                       worker,
+                       false);
     }
 
     public <Z> Z compile(Collection<OuterWrap> wraps,
@@ -192,14 +199,16 @@ class TaskFactory {
                        sh,
                        List.of("-Xlint:unchecked,-strictfp", "-proc:none", "-parameters"),
                        (jti, diagnostics) -> new CompileTask(sh, jti, diagnostics),
-                       worker);
+                       worker,
+                       true);
     }
 
     private synchronized <S, T extends BaseTask<S>, Z> Z runTask(Stream<S> inputs,
                                                  SourceHandler<S> sh,
                                                  List<String> options,
                                                  BiFunction<JavacTaskImpl, DiagnosticCollector<JavaFileObject>, T> creator,
-                                                 Worker<T, Z> worker) {
+                                                 Worker<T, Z> worker,
+                                                 boolean generate) {
             List<String> allOptions = new ArrayList<>(options.size() + state.extraCompilerOptions.size());
             allOptions.addAll(options);
             allOptions.addAll(state.extraCompilerOptions);
@@ -213,7 +222,8 @@ class TaskFactory {
                  JavacTaskImpl jti = (JavacTaskImpl) task;
                  Context context = jti.getContext();
                  DisableAccessibilityResolve.preRegister(context);
-                 jti.addTaskListener(new TaskListenerImpl(context, state));
+                 EnsureAdditionalNullChecksWriter.preRegister(context);
+                 jti.addTaskListener(new TaskListenerImpl(context, state, generate));
                  try {
                      return worker.withTask(creator.apply(jti, diagnostics));
                  } finally {
@@ -232,6 +242,7 @@ class TaskFactory {
                          repl.members_field = null;
                          repl.completer = ClassFinder.instance(context).getCompleter();
                      }
+                     EnsureAdditionalNullChecksWriter.instance(context).varsRequiringExtraChecks.clear();
                  }
             });
     }
@@ -643,14 +654,16 @@ class TaskFactory {
 
         private final Context context;
         private final JShell state;
+        private final boolean generate;
         /* Keep the original (declaration) types of the fields that were enhanced.
          * The declaration types need to be put back before writing the fields
          * into classfiles.*/
         private final Map<VarSymbol, Type> var2OriginalType = new HashMap<>();
 
-        public TaskListenerImpl(Context context, JShell state) {
+        public TaskListenerImpl(Context context, JShell state, boolean generate) {
             this.context = context;
             this.state = state;
+            this.generate = generate;
         }
 
         @Override
@@ -677,7 +690,31 @@ class TaskFactory {
 
         @Override
         public void finished(TaskEvent e) {
-            if (e.getKind() != TaskEvent.Kind.ENTER || variablesSet)
+            if (e.getKind() != TaskEvent.Kind.ENTER)
+                return ;
+            if (generate) {
+                //for the (top-level) variable in this snippet, if any, remove the possible non-null flag
+                //the JShell desugaring does not allow this variable (implemented as a field)
+                //to be non-null.
+                EnsureAdditionalNullChecksWriter nullChecksWriter =
+                        EnsureAdditionalNullChecksWriter.instance(context);
+                for (Tree clazz : e.getCompilationUnit().getTypeDecls()) {
+                    ClassTree ct = (ClassTree) clazz;
+
+                    for (Tree member : ct.getMembers()) {
+                        if (!(member instanceof JCVariableDecl var))
+                            continue;
+                        VarSymbol vsym = var.sym;
+                        if (vsym.type.getNullMarker() == NullMarker.NOT_NULL) {
+                            vsym.flags_field &= ~Flags.STRICT;
+                            vsym.type = vsym.type.asNullMarked(NullMarker.UNSPECIFIED);
+                            nullChecksWriter.varsRequiringExtraChecks.add(vsym);
+                        }
+                        var.init = null;
+                    }
+                }
+            }
+            if (variablesSet)
                 return ;
             state.maps
                  .snippetList()
@@ -731,8 +768,13 @@ class TaskFactory {
 
                             JCTypeCast tree = (JCTypeCast) expr;
                             rs.runWithoutAccessChecks(() -> {
-                                field.type = attr.attribType(tree.clazz,
-                                                             enter.getEnvs().iterator().next().enclClass.sym);
+                                Type attributedType = attr.attribType(tree.clazz,
+                                                                      enter.getEnvs().iterator().next().enclClass.sym);
+                                if (s.nonNull) {
+                                    attributedType = attributedType.asNullMarked(NullMarker.NOT_NULL);
+                                }
+
+                                field.type = attributedType;
                             });
                         }
                     } finally {
@@ -783,6 +825,38 @@ class TaskFactory {
         public boolean isAccessible(Env<AttrContext> env, Type site, Symbol sym, boolean checkInner) {
             if (noAccessChecks) return true;
             return super.isAccessible(env, site, sym, checkInner);
+        }
+
+        private static final class Marker {}
+    }
+
+    private static final class EnsureAdditionalNullChecksWriter extends NullChecksWriter {
+
+        public static void preRegister(Context context) {
+            if (context.get(Marker.class) == null) {
+                context.put(nullChecksWriterKey, ((Factory<NullChecksWriter>) c -> new EnsureAdditionalNullChecksWriter(c)));
+                context.put(Marker.class, new Marker());
+            }
+        }
+
+        public static EnsureAdditionalNullChecksWriter instance(Context context) {
+            return (EnsureAdditionalNullChecksWriter) NullChecksWriter.instance(context);
+        }
+
+        private final Attr attr;
+        private final Set<VarSymbol> varsRequiringExtraChecks = new HashSet<>();
+
+        public EnsureAdditionalNullChecksWriter(Context context) {
+            super(context);
+            attr = Attr.instance(context);
+        }
+
+        @Override
+        public void visitAssign(JCAssign tree) {
+            super.visitAssign(tree);
+            if (varsRequiringExtraChecks.contains(TreeInfo.symbolFor(tree.lhs))) {
+                tree.rhs = attr.makeNullCheck(tree.rhs, true);
+            }
         }
 
         private static final class Marker {}
